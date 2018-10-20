@@ -1,0 +1,222 @@
+<html>
+<head>
+<title>Google Takeout importer</title>
+<script src="https://linkeddata.github.io/mashlib/dist/mashlib.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', event => {
+
+  const live = false // live or test mode
+
+  const dom = document
+  const UI = window.UI
+  const store = UI.store
+  const fetcher = store.fetcher
+  // const load = store.fetcher.load does not work
+
+  const ns = UI.ns
+  const contains = ns.ldp('contains')
+  console.log('dom loaded')
+  const pre = dom.getElementById('log')
+  const div = dom.getElementById('work')
+  const statusArea = dom.getElementById('statusArea')
+  function log(str) {
+    console.log(str)
+    pre.textContent += str + '\n'
+  }
+  log('hello world')
+  async function importTakeout (root) {
+    function branch(branch, twig) {
+      return $rdf.sym(branch.uri + twig)
+    }
+    function tail(file) { // last part of the path
+      let split = file.uri.split('/') // @@ unencode
+      return decodeURIComponent(split.pop() || split.pop()) // file or folder
+    }
+    function fileIn (folder, tail) {
+      return $rdf.sym(folder.uri + tail)
+    }
+    function happy (response) {
+      if (!response.ok) {
+        let msg = '  HTTP error! Status: ' + response.statusRow
+        log(msg)
+        // statusRow.appendChild(UI.widgets.errorMessageBlock(dom, msg))
+      }
+      return response.ok
+    }
+
+    /** Convert a JSON like object to RDF
+    */
+    function mapPredicate(p) {
+      return $rdf.sym('http://www.w3.org/ns/pim/json#' + p) // @@ fix Makyby takeout ns?
+    }
+    function jsToRDF (x) {
+      if (x instanceof Array) {
+        let y = new $rdf.List()
+        x.forAll(x1 => y.elements.push(jsToRDF(x1)))
+        return y
+      } else if (x instanceof Object){
+        let y = new $rdf.BlankNode()
+        for (x1 in x) {
+          store.add(y, mapPredicate[x1], jsToRDF(x[x1]))
+        }
+        return y
+      } else {
+        return $rdf.Literal.fromValue(x)
+      }
+    }
+    /** Convert a JSON file into an RDF file
+    */
+    async function importJSON (doc, mapping) {
+      let response = fetcher.webOperation(doc, 'GET')
+      if (!happy(response)) return
+      const desc = response.responseText
+
+      const json = JSON.parse(desc)
+      let subject = $rdf.sym(doc.uri + '.ttl#this')
+      log(JSON.stringify(json))
+      store.add(subject, map('data'), jsToRDF(json))
+      let text = $rdf.serialize(subject.doc())
+    }
+    async function importCSV (doc, mapping) {
+      log('  CSV doc ' + doc)
+      let response = fetcher.webOperation(doc, 'GET')
+      if (!happy(response)) return
+      const desc = response.responseText
+      log('   Parsing CSV ' + desc)
+
+      //  @@@ parse CSV
+
+      const json = JSON.parse(desc)
+      let subject = $rdf.sym(doc.uri + '.ttl#this')
+      log(JSON.stringify(json))
+      store.add(subject, map('data'), jsToRDF(json))
+      let text = $rdf.serialize(subject.doc())
+    }
+    async function importGroups (folder) {
+      log('  Import Groups:')
+      let resp = await fetcher.load(folder)
+      store.each(folder,contains).forEach(groupFolder => {
+        if (!groupFolder.uri.endsWith('/')) // ignore .DS_Store
+        log('  Group folder ' + groupFolder)
+        importCSV(fileIn(groupFolder, 'members.csv'))
+      })
+    }
+
+    function debugTurtle (x) {
+      let sts = store.connectedStatements(x)
+      let sz = new $rdf.Serializer(store)
+      return sz.statementsToN3(sts)
+    }
+
+    async function importPhotos (folder) {
+      log('  Import Photos:')
+      let resp = await fetcher.load(folder)
+      let albums = store.each(folder,contains)
+      log('albums.length: ' + albums.length)
+      for (let i=0; i< albums.length; i++) {
+        let photoFolder = albums[i]
+        log('  Photo Album ' + photoFolder)
+        if (!photoFolder.uri.endsWith('/')) continue
+        await fetcher.load(photoFolder)
+        importJSON(fileIn(photoFolder, 'metadata.json'))
+        store.each(photoFolder,contains).forEach(photo => {
+          log('Photo data ' + photo)
+          log(debugTurtle(photo))
+          let classURIs = kb.each(photo, type).map(x => x.uri).join(',')
+          if (classURIs includes 'iana/media-types/video' ||
+             classURIs includes 'iana/media-types/image' ) {
+               log('      Media')
+
+          } else {
+            log('      Non-media')
+          }
+
+        })
+      }
+    }
+
+    context = {dom, div, statusArea}
+    if (live) {
+      // context = await UI.authn.findAppInstances(context, ns.vcard('AddressBook'))
+    } else {
+      context.instances = [ $rdf.sym('http://localhost:3080/timbl/Data/Contacts/index.ttl#this')]
+      context.me =  $rdf.sym('https://www.w3.org/People/Berners-Lee/card#i')
+    }
+
+    var addressBook
+    if (!context.instances.length) {
+      log("@@@ Wot no address book")
+    } else {
+      addressBook = context.instances[0]
+      log("Address book " + addressBook)
+    }
+
+    log('done  findAppInstances')
+    log('loading ' + root)
+    let resp = await fetcher.load(root)
+    log('loaded ' + root)
+    let folders = store.each(root, contains)
+    for (let i=0; i < folders.length; i++) {
+      let folder = folders[i]
+      log(' Folder: ' + folder)
+      let name = tail(folder)// @@ unencode
+      log(' Looking at ' + name)
+      if (name.startsWith('.')) {
+        log('  ignoring hidden ' + name)
+
+      } else {
+        switch(name) {
+          case '+1s':
+            log(' Import Plus-ones (Bookmarks):')
+            // Here need to parse a HTML Netscape bookmark file
+            break
+          case 'Contacts':
+            log('  Import Contacts:')
+            break
+          case 'Contacts':
+            log('  Import Contacts:')
+            break
+          case 'Google Photos':
+            log('  Import Google Photos:')
+            await importPhotos(folder)
+            break
+          case 'Google+ Circles':
+            log('  Import Google Photos:')
+            break
+          case 'Groups':
+            let status = await importGroups(folder)
+            break
+
+          case 'index.html':
+            log(' skipping ' + name)
+            break
+          default:
+            log(' @@@@@@@ Unknown Top level Takeout: ' + name)
+        }
+      }
+    }
+  }
+  const here = $rdf.sym(document.location.href)
+  const root = $rdf.sym(here.dir().uri + 'Takeout/')
+  importTakeout(root)
+})
+</script>
+</head>
+<body>
+<h1>Import Takeout</h1>
+<p>This HTL file, if you want to uyse it as a tool,
+  should be put in the server as your google takeout data.
+<div>
+
+<pre id='log'>
+</pre>
+
+<div id='work' style='border-radius: 0.5em; border: solid gray 0.1em; padding: 1em;margin: 0.5em;'>
+</div>
+
+<div id='statusArea' style='border-radius: 0.5em; border: solid gray 0.1em; padding: 1em;margin: 0.5em;'>
+</div>
+
+</div>
+</body>
+</html>
