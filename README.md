@@ -47,7 +47,7 @@ timbl
 
 ### Apple
 - Tidbits, [How to Download all Your Apple Data](https://tidbits.com/2018/05/31/how-to-download-all-your-apple-data/)
-- privacy.apple.com
+- Apple, [Data and Privacy](https://privacy.apple.com/)
 
 ### Facebook
 - [What to look for in yoruu Facebook data - and how to find it](https://www.wired.com/story/download-facebook-data-how-to-read/)
