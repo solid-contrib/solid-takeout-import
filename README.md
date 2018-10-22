@@ -50,7 +50,7 @@ timbl
 - privacy.apple.com
 
 ### Facebook
-- [What to look for in yoruu Facebook data - and how to find it](https://www.wired.com/story/download-facebook-data-how-to-read/)
+- [What to look for in your Facebook data - and how to find it](https://www.wired.com/story/download-facebook-data-how-to-read/)
 - [Facebook Download your data](https://www.facebook.com/dyi/)
 
 ### Google
