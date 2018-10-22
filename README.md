@@ -2,7 +2,7 @@
 Import your Google Takeout (etc) data into your solid pod so you can keep it and use it with Solid apps
 
 Google allow you to take the data you have on Google Plus and similar things
-end export it at the [Google Taekout website](https://takeout.google.com/).  
+end export it at the [Google Takeout website](https://takeout.google.com/).  
 
 You select various sorts of data, then ask for it to be delivered in `.zip` file fomat or `.tgz` format.  Google then
 does it in the background and send you an email when it is ready with a download link.
