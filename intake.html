@@ -1,9 +1,13 @@
 <html>
 <head>
-<title>Google Takeout importer</title>
+<title>Google Takeout importer</title> <!--
 <script src="https://linkeddata.github.io/mashlib/dist/mashlib.js"></script>
+-->
+<script src="https://timbl.com/timbl/Automation/Library/Mashup/mashlib.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', event => {
+
+// zip file reading https://gildas-lormeau.github.io/zip.js/core-api.html
 
   const live = false // live or test mode
 
@@ -15,6 +19,7 @@ document.addEventListener('DOMContentLoaded', event => {
 
   const ns = UI.ns
   const contains = ns.ldp('contains')
+  const type = ns.rdf('type')
   console.log('dom loaded')
   const pre = dom.getElementById('log')
   const div = dom.getElementById('work')
@@ -37,8 +42,9 @@ document.addEventListener('DOMContentLoaded', event => {
     }
     function happy (response) {
       if (!response.ok) {
-        let msg = '  HTTP error! Status: ' + response.statusRow
+        let msg = '  HTTP error! Status: ' + response.status + ' for ' + response.url
         log(msg)
+        response.error = new Error(msg)
         // statusRow.appendChild(UI.widgets.errorMessageBlock(dom, msg))
       }
       return response.ok
@@ -49,17 +55,22 @@ document.addEventListener('DOMContentLoaded', event => {
     function mapPredicate(p) {
       return $rdf.sym('http://www.w3.org/ns/pim/json#' + p) // @@ fix Makyby takeout ns?
     }
-    function jsToRDF (x) {
+    function jsToRDF (x, doc) {
+      log('          jsonToRDF: ' + JSON.stringify(x))
       if (x instanceof Array) {
         let y = new $rdf.List()
-        x.forAll(x1 => y.elements.push(jsToRDF(x1)))
+        x.forAll(x1 => y.elements.push(jsToRDF(x1, doc)))
         return y
       } else if (x instanceof Object){
-        let y = new $rdf.BlankNode()
-        for (x1 in x) {
-          store.add(y, mapPredicate[x1], jsToRDF(x[x1]))
+        let subject = new $rdf.BlankNode()
+        for (key in x) {
+          let object = jsToRDF(x[key], doc)
+          log('        subject   ' +  subject)
+          log('        predicate ' +  mapPredicate(key))
+          log('        object    ' +  object)
+          store.add(subject, mapPredicate(key), object, doc)
         }
-        return y
+        return subject
       } else {
         return $rdf.Literal.fromValue(x)
       }
@@ -67,39 +78,166 @@ document.addEventListener('DOMContentLoaded', event => {
     /** Convert a JSON file into an RDF file
     */
     async function importJSON (doc, mapping) {
-      let response = fetcher.webOperation(doc, 'GET')
-      if (!happy(response)) return
+      log('Importing JSON doc ' + doc)
+      let response = await fetcher.webOperation('GET', doc.uri)
+      log(' ...  @@ done load ' + doc)
+      if (!happy(response)) return response.error
       const desc = response.responseText
 
       const json = JSON.parse(desc)
       let subject = $rdf.sym(doc.uri + '.ttl#this')
-      log(JSON.stringify(json))
-      store.add(subject, map('data'), jsToRDF(json))
-      let text = $rdf.serialize(subject.doc())
+      log('    regurgitated json:')
+      log(JSON.stringify(json) + '\n')
+      let RDFobject = jsToRDF(json, doc)
+      store.add(subject, mapPredicate('data'), RDFobject)
+      let text = $rdf.serialize(subject.doc(), store)
+      log('          RDF from JSON: ' + text)
     }
-    async function importCSV (doc, mapping) {
+    async function importCSV (doc, namespace) {
       log('  CSV doc ' + doc)
-      let response = fetcher.webOperation(doc, 'GET')
+      let response = fetcher.webOperation('GET', doc)
       if (!happy(response)) return
-      const desc = response.responseText
+      const text = response.responseText
       log('   Parsing CSV ' + desc)
-
-      //  @@@ parse CSV
-
-      const json = JSON.parse(desc)
-      let subject = $rdf.sym(doc.uri + '.ttl#this')
-      log(JSON.stringify(json))
-      store.add(subject, map('data'), jsToRDF(json))
-      let text = $rdf.serialize(subject.doc())
+      loadCSV(text, store, doc, namespace)
     }
+
+
+      //  @@@ parse CSV////////////////////////////////////////
+
+      function parseCSV (text, delim) {
+      /** Column heading sanatize
+        */
+        function sanitize (s) {
+          return s.replace('\n', ' ')
+        }
+
+        /** Santize a string can be used as ID
+        */
+        function sanitizeID (s) {
+          const alpha = 'abcdefghijklmnopqrstuvwxyz' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+          const digits = '0123456789'
+          const alphnum = alpha + digits
+          let res = ''
+          for (let ch of s) {
+            if (alphnum.includes(ch)) {
+              res += ch
+            } else {
+               if (res.slice(-1) !== '_') {
+                 res += '_' // convert to underscore but not multiple
+               }
+            }
+          }
+          while (res.slice(-1) === '_') {
+            res = res.slice(0,-1)
+          }
+          return res
+        }
+
+        /** Read a comma separated file (or tab sep) text
+        * @param {string} delim - typically comma or tab charcater
+        */
+
+        function readOneRow() { // Was: readTabs
+          line = lines.shift() // take first
+          while (line !== "" && '\r\n'.includes(line.slice(-1))) {
+            line = line.slice(0, -1)
+          }
+          var fields = []
+          var field = ''
+          while (true) {
+            if (line[0] === '"') { // Quoted string
+                line = line.slice(1) // chop quote
+                while (1) { // Looking for unescaped terminator
+                  let j = line.indexOf('"')
+                  if (j >= 0) {
+                    if (line.slice(j+1, j+2) === '"') {
+                      field += line.slice(0,j +1)
+                      line = line.slice(j + 2)
+                    } else { //
+                      field += line.slice(0,j) // we are done
+                      line = line.slice(j + 1)
+                      break // next field
+                    }
+                  } else {
+                    field += line + '\n'
+                    line = lines.shift() // Get more lines as quoted strings can cross them
+                  }
+                } // looking fior end of field
+            } else { // not quote
+              let j = line.indexOf(delim)
+              if (j < 0) { // No more fields
+                field = line
+              } else {
+                field = line.slice(0, j)
+                line = line.slice(j+1)
+              }
+            }
+            fields.append(field)
+          } // feields
+          return fields
+        }
+        delim = delim || ','
+        var lines = text.split('\n')
+        const headers = readOneRow()
+        headers = headers.map(h => {
+          return h.trim()
+        })
+        if (headers.slice(-1)[0] === '') {
+          headers = headers.slice(0, -1) // remove empty field from paypal trailing comma
+        }
+        var lineno = 2
+        var table = []
+        while (true) {
+          let values = readOneRow()
+          if (values.length === 0) break
+          if (values.length === 1) continue
+          if (values .length !== headers.length) {
+            console.log(` Line ${lineno}: Warning: ${headers.length} headings but ${values.length} values`)
+          }
+          table.append(values)
+        }
+
+        return [headers, values]
+
+      } // parse CSV
+
+      function loadCSV (text, store, doc, namespace) {
+        namespace = namespace || 'http://www.w3.org/ns/pim/csv' // @@@
+        var headers, values
+        const base = doc.uri
+        [ headers, values ] = parseCSV(text, ',')
+
+        let labels = headers.map(h => {
+          let h = sanitizeID(h)
+          return h.slice(0,1).toLowerCase() + h.slice(1) // Initial lower case for predicate
+        })
+
+        for (let r=0; r < values.length; r++) {
+          row = values[r]
+          for (let col=0; col < row.length; col++) {
+            let subject = store.sym(base + 'n' + r)
+            let predicate = store.sym(namespace + label[col])
+            let object = row[col] // @@@ guess data types
+            store.add(subject, predicate, object, doc)
+          }
+        }
+      }
+
+      //  @@@ end parse CSV////////////////////////////////////////
+
+
     async function importGroups (folder) {
       log('  Import Groups:')
       let resp = await fetcher.load(folder)
-      store.each(folder,contains).forEach(groupFolder => {
-        if (!groupFolder.uri.endsWith('/')) // ignore .DS_Store
-        log('  Group folder ' + groupFolder)
-        importCSV(fileIn(groupFolder, 'members.csv'))
-      })
+      if (happy(resp)) {
+        store.each(folder,contains).forEach(groupFolder => {
+          if (groupFolder.uri.endsWith('/'))  {
+            log('  Group folder ' + groupFolder)
+            importCSV(fileIn(groupFolder, 'members.csv'))
+          }// ignore .DS_Store
+        })
+      }
     }
 
     function debugTurtle (x) {
@@ -111,20 +249,23 @@ document.addEventListener('DOMContentLoaded', event => {
     async function importPhotos (folder) {
       log('  Import Photos:')
       let resp = await fetcher.load(folder)
+      if (!happy(resp)) return resp.error
       let albums = store.each(folder,contains)
       log('albums.length: ' + albums.length)
       for (let i=0; i< albums.length; i++) {
         let photoFolder = albums[i]
         log('  Photo Album ' + photoFolder)
         if (!photoFolder.uri.endsWith('/')) continue
-        await fetcher.load(photoFolder)
-        importJSON(fileIn(photoFolder, 'metadata.json'))
+        let resp = await fetcher.load(photoFolder)
+        if (!happy(resp)) return response.error
+        log('    Importing the metadata.json:')
+        let status = await importJSON(fileIn(photoFolder, 'metadata.json'))
         store.each(photoFolder,contains).forEach(photo => {
           log('Photo data ' + photo)
           log(debugTurtle(photo))
-          let classURIs = kb.each(photo, type).map(x => x.uri).join(',')
-          if (classURIs includes 'iana/media-types/video' ||
-             classURIs includes 'iana/media-types/image' ) {
+          let classURIs = store.each(photo, type).map(x => x.uri).join(',')
+          if (classURIs.includes('iana/media-types/video') ||
+             classURIs.includes('iana/media-types/image')) {
                log('      Media')
 
           } else {
@@ -137,7 +278,7 @@ document.addEventListener('DOMContentLoaded', event => {
 
     context = {dom, div, statusArea}
     if (live) {
-      // context = await UI.authn.findAppInstances(context, ns.vcard('AddressBook'))
+      context = await UI.authn.findAppInstances(context, ns.vcard('AddressBook'))
     } else {
       context.instances = [ $rdf.sym('http://localhost:3080/timbl/Data/Contacts/index.ttl#this')]
       context.me =  $rdf.sym('https://www.w3.org/People/Berners-Lee/card#i')
