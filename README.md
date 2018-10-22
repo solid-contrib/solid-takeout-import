@@ -39,7 +39,7 @@ timbl
 
 
 
-##See also:
+## See also:
 
 ### Amazon
 - Marc Salzman [Amazon (and Alexa) know a whole lot about you. Here's how download and delete that info](https://www.usatoday.com/story/tech/columnist/saltzman/2018/04/04/amazon-and-alexa-know-whole-lot-you-heres-how-download-and-delete-info/482286002/)
