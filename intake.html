@@ -3,7 +3,7 @@
 <title>Google Takeout importer</title> <!--
 <script src="https://linkeddata.github.io/mashlib/dist/mashlib.js"></script>
 -->
-<script src="https://timbl.com/timbl/Automation/Library/Mashup/mashlib.js"></script>
+<script src="http://localhost:3080/timbl/Automation/Library/Mashup/mashlib.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', event => {
 
@@ -55,20 +55,19 @@ document.addEventListener('DOMContentLoaded', event => {
     function mapPredicate(p) {
       return $rdf.sym('http://www.w3.org/ns/pim/json#' + p) // @@ fix Makyby takeout ns?
     }
-    function jsToRDF (x, doc) {
-      log('          jsonToRDF: ' + JSON.stringify(x))
+    function jsToRDF (x, newDoc) {
+      //log('     jsToRDF: ' + JSON.stringify(x))
       if (x instanceof Array) {
         let y = new $rdf.List()
-        x.forAll(x1 => y.elements.push(jsToRDF(x1, doc)))
+        x.forAll(x1 => y.elements.push(jsToRDF(x1, newDoc)))
         return y
       } else if (x instanceof Object){
         let subject = new $rdf.BlankNode()
-        for (key in x) {
-          let object = jsToRDF(x[key], doc)
-          log('        subject   ' +  subject)
-          log('        predicate ' +  mapPredicate(key))
-          log('        object    ' +  object)
-          store.add(subject, mapPredicate(key), object, doc)
+        for (let key in x) {
+          let object = jsToRDF(x[key], newDoc)
+          let predicate = mapPredicate(key)
+          log (`         Add {${subject} ${predicate} ${object}} @ ${tail(newDoc)}`)
+          store.add(subject, predicate, object, newDoc)
         }
         return subject
       } else {
@@ -77,7 +76,7 @@ document.addEventListener('DOMContentLoaded', event => {
     }
     /** Convert a JSON file into an RDF file
     */
-    async function importJSON (doc, mapping) {
+    async function importJSON (doc, newDoc, mapping) {
       log('Importing JSON doc ' + doc)
       let response = await fetcher.webOperation('GET', doc.uri)
       log(' ...  @@ done load ' + doc)
@@ -85,17 +84,18 @@ document.addEventListener('DOMContentLoaded', event => {
       const desc = response.responseText
 
       const json = JSON.parse(desc)
-      let subject = $rdf.sym(doc.uri + '.ttl#this')
+      let subject = $rdf.sym(newDoc.uri + '.ttl#this')
       log('    regurgitated json:')
       log(JSON.stringify(json) + '\n')
-      let RDFobject = jsToRDF(json, doc)
-      store.add(subject, mapPredicate('data'), RDFobject)
-      let text = $rdf.serialize(subject.doc(), store)
-      log('          RDF from JSON: ' + text)
+      let RDFobject = jsToRDF(json, newDoc)
+      store.add(subject, mapPredicate('data'), RDFobject, newDoc)
+      let text = $rdf.serialize(newDoc, store)
+      log(`      RDF from JSON: doc ${newDoc}\n:text: >>>>${text}<<<<\n`)
+      return newDoc
     }
     async function importCSV (doc, namespace) {
       log('  CSV doc ' + doc)
-      let response = fetcher.webOperation('GET', doc)
+      let response = await fetcher.webOperation('GET', doc)
       if (!happy(response)) return
       const text = response.responseText
       log('   Parsing CSV ' + desc)
@@ -248,6 +248,7 @@ document.addEventListener('DOMContentLoaded', event => {
 
     async function importPhotos (folder) {
       log('  Import Photos:')
+
       let resp = await fetcher.load(folder)
       if (!happy(resp)) return resp.error
       let albums = store.each(folder,contains)
@@ -258,41 +259,58 @@ document.addEventListener('DOMContentLoaded', event => {
         if (!photoFolder.uri.endsWith('/')) continue
         let resp = await fetcher.load(photoFolder)
         if (!happy(resp)) return response.error
+
         log('    Importing the metadata.json:')
-        let status = await importJSON(fileIn(photoFolder, 'metadata.json'))
+        let newAlbum = $rdf.sym(newPhotoLibrary.dir().uri + 'Albums/' + tail(photoFolder) + '/index.ttl#this')
+        let newAlbumDoc = newAlbum.doc()
+        let status = await importJSON(fileIn(photoFolder, 'metadata.json'), newAlbumDoc)
+
         store.each(photoFolder,contains).forEach(photo => {
           log('Photo data ' + photo)
           log(debugTurtle(photo))
           let classURIs = store.each(photo, type).map(x => x.uri).join(',')
           if (classURIs.includes('iana/media-types/video') ||
              classURIs.includes('iana/media-types/image')) {
-               log('      Media')
+               let newPhotoDoc = $rdf.sym(newAlbumDoc.uri + tail(photo))
+               let newPhotoMetaDoc = $rdf.sym(newAlbumDoc.uri + tail(photo) + .ttl)
+               log('      Media: '+ photo)
+               let mediaMetaDoc = $rdf.sym(photo.uri + '.json')
+               let mediaMetaDoc = $rdf.sym(photo.uri + '.json')
+               log('      Media: '+ mediaMetaDoc)
+               await importJSON(mediaMetaDoc, newPhotoMetaDoc)
 
           } else {
-            log('      Non-media')
+            log('      Non-media: ' + photo)
           }
 
         })
       }
     }
 
-    context = {dom, div, statusArea}
+    var ABContext = {dom, div, statusArea}
     if (live) {
-      context = await UI.authn.findAppInstances(context, ns.vcard('AddressBook'))
+      ABContext = await UI.authn.findAppInstances(ABContext, ns.vcard('AddressBook'))
     } else {
-      context.instances = [ $rdf.sym('http://localhost:3080/timbl/Data/Contacts/index.ttl#this')]
-      context.me =  $rdf.sym('https://www.w3.org/People/Berners-Lee/card#i')
+      ABContext.instances = [ $rdf.sym('http://localhost:3080/timbl/Data/Contacts/index.ttl#this')]
+      ABContext.me =  $rdf.sym('https://www.w3.org/People/Berners-Lee/card#i')
     }
-
     var addressBook
-    if (!context.instances.length) {
+    if (!ABContext.instances.length) {
       log("@@@ Wot no address book")
     } else {
-      addressBook = context.instances[0]
+      addressBook = ABContext.instances[0]
       log("Address book " + addressBook)
     }
 
-    log('done  findAppInstances')
+    var photoLibraryContext = {dom, div, statusArea}
+    if (live) {
+      photoLibraryContext = await UI.authn.findAppInstances(photoLibraryContext, ns.solid('PhotoLibrary'))
+    } else {
+      photoLibraryContext.instances = [ $rdf.sym('http://localhost:3080/timbl/Photos/index.ttl#this')]
+      photoLibraryContext.me =  $rdf.sym('https://www.w3.org/People/Berners-Lee/card#i')
+    }
+    var newPhotoLibrary = photoLibraryContext.instances[0]
+
     log('loading ' + root)
     let resp = await fetcher.load(root)
     log('loaded ' + root)
