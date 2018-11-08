@@ -5,7 +5,7 @@ Google allow you to take the data you have on Google Plus and similar things
 end export it at the [Google Takeout website](https://takeout.google.com/).  
 
 You select various sorts of data, then ask for it to be delivered in `.zip` file format or `.tgz` format.  Google then
-does it in the background and sends you an email with a download link when it is ready.
+does it in the background, then sends you an email with a link to the archive when it is ready to download.
 (You can also ask for it to be stored in various places you control, but not *yet* solid pods.)
 
 - You click on the download link on your computer, and get a `.zip` (or `.tgz`) archive file.
@@ -20,8 +20,8 @@ What you can do on your computer of course is:
 
 The future goal is to be able to:
 
-- Upload the Zip file onto your solid pod by dragging it onto a folder's green '+' con
-- Run this code to find your own existing solid assets such as contacts and photos
+- Upload the Zip file onto your solid pod by dragging it onto a folder's green '+' icon
+- Run this code to to find your own existing solid assets such as contacts and photos
 - Use it to copy from your takeout archive file into your contacts without replication.
 - Ideally, if you have already imported the data that copy will be eft, and just new stuff added.
 
